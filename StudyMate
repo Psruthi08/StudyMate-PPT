@@ -1,86 +1,178 @@
-from transformers import pipeline
-from pypdf import PdfReader
-qa_pipeline = pipeline(
-    "text-generation",
-    model="ibm-granite/granite-3b-instruct",  # Hugging Face model name
-    device_map="auto"  # Uses GPU if available
-)
-def extract_text_from_pdf(pdf_path):
-  reader = PdfReader(pdf_path)
-  text = ""
-  for page in reader.pages:
-      text += page.extract_text() + "\n"
-  return text
-def ask_question(pdf_text, question):
-  prompt = f"Answer the following question based only on the PDF content:\n\nPDF Content:\n{pdf_text[:2000]}\n\nQuestion: {question}\nAnswer:"
+import streamlit as st
+import PyPDF2
+import os
+from groq import Groq
 
-  result = qa_pipeline(prompt, max_new_tokens=150, do_sample=True)
-  return result[0]["generated_text"]
+
+def extract_text_from_pdf(pdf_file):
+    """Extract text from uploaded PDF file."""
+    pdf_text = ""
+    try:
+        reader = PyPDF2.PdfReader(pdf_file)
+        for page in reader.pages:
+            pdf_text += page.extract_text() + "\n"
+        return pdf_text
+    except Exception as e:
+        st.error(f"Error reading PDF: {str(e)}")
+        return ""
+
+
+def ask_groq_question(context, question):
+    """Use Groq AI to answer questions based on PDF context."""
+    try:
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+        prompt = f"""You are an AI assistant helping students understand documents. Based on the following document content, please answer the question accurately and concisely.
+
+Document Content:
+{context[:4000]}  # Limit context to avoid token limits
+
+Question: {question}
+
+Please provide a clear, helpful answer based only on the information in the document. If the answer isn't in the document, say so."""
+
+        completion = client.chat.completions.create(
+            model="mixtral-8x7b-32768",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.1,
+            max_tokens=500
+        )
+
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"Error generating answer: {str(e)}"
+
+
+def main():
+    st.set_page_config(page_title="StudyMate - AI-Powered PDF Q&A",
+                       page_icon="📚",
+                       layout="wide")
+
+    st.title("📚 StudyMate: AI-Powered PDF Q&A System")
+    st.markdown(
+        "**Upload a PDF and ask intelligent questions using Groq AI!** 🚀")
+
+    # Sidebar for PDF upload
+    with st.sidebar:
+        st.header("📄 Upload PDF")
+        uploaded_file = st.file_uploader(
+            "Choose a PDF file",
+            type="pdf",
+            help=
+            "Upload your study material, research paper, or any PDF document")
+
+        if uploaded_file:
+            st.success("✅ PDF uploaded successfully!")
+            st.info(f"📊 File size: {uploaded_file.size:,} bytes")
+
+    # Main content area
+    if uploaded_file:
+        # Extract text from PDF
+        with st.spinner("🔄 Extracting text from PDF..."):
+            context = extract_text_from_pdf(uploaded_file)
+
+        if context:
+            st.success(
+                "✅ PDF processed successfully! Ask your questions below.")
+
+            # Display PDF stats
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📝 Characters", f"{len(context):,}")
+            with col2:
+                st.metric("📖 Words", f"{len(context.split()):,}")
+            with col3:
+                st.metric("📄 Sentences", f"{len(context.split('.')):,}")
+
+            st.divider()
+
+            # Question input
+            st.header("🤔 Ask Your Question")
+            question = st.text_input(
+                "What would you like to know about this document?",
+                placeholder=
+                "e.g., What is the main topic? Who are the authors? What are the key findings?",
+                key="question_input")
+
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                ask_button = st.button("🚀 Get AI Answer", type="primary")
+
+            if ask_button and question:
+                with st.spinner(
+                        "🧠 AI is analyzing your document and generating an answer..."
+                ):
+                    answer = ask_groq_question(context, question)
+
+                st.header("💡 AI Answer")
+                st.success(answer)
+
+            elif ask_button and not question:
+                st.warning("⚠️ Please enter a question first.")
+
+            # Example questions
+            with st.expander("💭 Try These Example Questions"):
+                example_questions = [
+                    "What is the main topic of this document?",
+                    "Who are the authors or key people mentioned?",
+                    "What are the most important findings or conclusions?",
+                    "What methodology or approach was used?",
+                    "What are the key recommendations?",
+                    "Summarize the document in 3 bullet points"
+                ]
+                for eq in example_questions:
+                    if st.button(f"📝 {eq}", key=f"example_{hash(eq)}"):
+                        st.session_state.question_input = eq
+                        st.rerun()
+
+            # Document preview
+            with st.expander("📖 Document Preview"):
+                preview_length = min(1000, len(context))
+                st.text_area("First 1000 characters:",
+                             context[:preview_length] +
+                             ("..." if len(context) > preview_length else ""),
+                             height=200,
+                             disabled=True)
+
+        else:
+            st.error(
+                "❌ Failed to extract text from the PDF. Please try a different file."
+            )
+
+    else:
+        # Welcome screen
+        st.markdown("""
+        ### 🎓 Welcome to StudyMate!
+        
+        **StudyMate** is your AI-powered study companion powered by **Groq AI** that helps you:
+        
+        - 📚 **Upload any PDF document** (textbooks, research papers, articles, etc.)
+        - 🤖 **Ask intelligent questions** using advanced AI models
+        - ⚡ **Get instant, accurate answers** with lightning-fast AI processing
+        - 📖 **Study more efficiently** with AI-powered document analysis
+        
+        ### 🚀 **Getting Started:**
+        1. **Upload** your PDF file using the sidebar
+        2. **Wait** for the text extraction to complete
+        3. **Ask** questions about the document content
+        4. **Get** intelligent AI-powered answers instantly!
+        
+        ### 🎯 **Perfect for:**
+        - 🎓 Students studying course materials
+        - 🔬 Researchers analyzing papers  
+        - 💼 Professionals reviewing documents
+        - 📊 Anyone needing quick insights from PDFs
+        
+        ---
+        *Powered by Groq AI for ultra-fast, intelligent responses* ⚡
+        """)
+
+
 if __name__ == "__main__":
-  pdf_path = "sample.pdf"   # Upload your PDF in Replit
-  pdf_text = extract_text_from_pdf(pdf_path)
+    main()
 
-  while True:
-      question = input("\nAsk a question (or type 'exit' to quit): ")
-      if question.lower() == "exit":
-          break
-      answer = ask_question(pdf_text, question)
-      print("\nAnswer:", answer)
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Upload PDF</title>
-</head>
-<body>
-  <h2>Upload a PDF</h2>
-  <input type="file" id="pdfInput" />
-  <button onclick="uploadPDF()">Upload</button>
-
-  <script>
-    async function uploadPDF() {
-      const fileInput = document.getElementById("pdfInput");
-      const file = fileInput.files[0];
-      if (!file) {
-        alert("Please select a PDF first!");
-        return;
-      }
-
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch("http://localhost:8000/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const result = await response.json();
-      console.log(result);
-      alert(result.message);
-    }
-  </script>
-</body>
-</html>
-                    from flask import Flask, request, jsonify
-                    import os
-
-                    app = Flask(__name__)
-                    UPLOAD_FOLDER = "uploads"
-                    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-                    @app.route("/upload", methods=["POST"])
-                    def upload_pdf():
-                        if "file" not in request.files:
-                            return jsonify({"error": "No file part"}), 400
-
-                        file = request.files["file"]
-                        if file.filename == "":
-                            return jsonify({"error": "No selected file"}), 400
-
-                        # Save PDF to uploads/
-                        filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-                        file.save(filepath)
-
-                        return jsonify({"message": "File uploaded successfully", "path": filepath})
-
-                    if __name__ == "__main__":
-                        app.run(host="0.0.0.0", port=8000)
