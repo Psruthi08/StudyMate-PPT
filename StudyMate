@@ -1,0 +1,86 @@
+from transformers import pipeline
+from pypdf import PdfReader
+qa_pipeline = pipeline(
+    "text-generation",
+    model="ibm-granite/granite-3b-instruct",  # Hugging Face model name
+    device_map="auto"  # Uses GPU if available
+)
+def extract_text_from_pdf(pdf_path):
+  reader = PdfReader(pdf_path)
+  text = ""
+  for page in reader.pages:
+      text += page.extract_text() + "\n"
+  return text
+def ask_question(pdf_text, question):
+  prompt = f"Answer the following question based only on the PDF content:\n\nPDF Content:\n{pdf_text[:2000]}\n\nQuestion: {question}\nAnswer:"
+
+  result = qa_pipeline(prompt, max_new_tokens=150, do_sample=True)
+  return result[0]["generated_text"]
+if __name__ == "__main__":
+  pdf_path = "sample.pdf"   # Upload your PDF in Replit
+  pdf_text = extract_text_from_pdf(pdf_path)
+
+  while True:
+      question = input("\nAsk a question (or type 'exit' to quit): ")
+      if question.lower() == "exit":
+          break
+      answer = ask_question(pdf_text, question)
+      print("\nAnswer:", answer)
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Upload PDF</title>
+</head>
+<body>
+  <h2>Upload a PDF</h2>
+  <input type="file" id="pdfInput" />
+  <button onclick="uploadPDF()">Upload</button>
+
+  <script>
+    async function uploadPDF() {
+      const fileInput = document.getElementById("pdfInput");
+      const file = fileInput.files[0];
+      if (!file) {
+        alert("Please select a PDF first!");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("http://localhost:8000/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await response.json();
+      console.log(result);
+      alert(result.message);
+    }
+  </script>
+</body>
+</html>
+                    from flask import Flask, request, jsonify
+                    import os
+
+                    app = Flask(__name__)
+                    UPLOAD_FOLDER = "uploads"
+                    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+                    @app.route("/upload", methods=["POST"])
+                    def upload_pdf():
+                        if "file" not in request.files:
+                            return jsonify({"error": "No file part"}), 400
+
+                        file = request.files["file"]
+                        if file.filename == "":
+                            return jsonify({"error": "No selected file"}), 400
+
+                        # Save PDF to uploads/
+                        filepath = os.path.join(UPLOAD_FOLDER, file.filename)
+                        file.save(filepath)
+
+                        return jsonify({"message": "File uploaded successfully", "path": filepath})
+
+                    if __name__ == "__main__":
+                        app.run(host="0.0.0.0", port=8000)
